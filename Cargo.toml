@@ -18,18 +18,18 @@ license-file = "LICENSE"
 
 [workspace.dependencies]
 # Apollo 0.14.2 RC.7 plus the PC-mainnet SNOS performance fixes.
-starknet_api = { git = "https://github.com/madara-alliance/sequencer", branch = "dev", features = [
+starknet_api = { git = "https://github.com/madara-alliance/sequencer", rev = "79d505342471c1cab58bcd3fa0b48fe3a521cde6", features = [
   "testing",
 ] }
-starknet_os = { git = "https://github.com/madara-alliance/sequencer", branch = "dev" }
-blockifier = { git = "https://github.com/madara-alliance/sequencer", branch = "dev", features = [
+starknet_os = { git = "https://github.com/madara-alliance/sequencer", rev = "79d505342471c1cab58bcd3fa0b48fe3a521cde6" }
+blockifier = { git = "https://github.com/madara-alliance/sequencer", rev = "79d505342471c1cab58bcd3fa0b48fe3a521cde6", features = [
   "testing",
   "reexecution",
 ] }
-starknet_patricia = { git = "https://github.com/madara-alliance/sequencer", branch = "dev", features = [
+starknet_patricia = { git = "https://github.com/madara-alliance/sequencer", rev = "79d505342471c1cab58bcd3fa0b48fe3a521cde6", features = [
   "testing",
 ] }
-shared_execution_objects = { git = "https://github.com/madara-alliance/sequencer", branch = "dev" }
+shared_execution_objects = { git = "https://github.com/madara-alliance/sequencer", rev = "79d505342471c1cab58bcd3fa0b48fe3a521cde6" }
 
 cairo-lang-starknet = "=2.17.0"
 cairo-lang-starknet-classes = "=2.17.0"
