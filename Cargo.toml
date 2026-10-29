@@ -17,24 +17,26 @@ repository = "https://github.com/keep-starknet-strange/snos/"
 license-file = "LICENSE"
 
 [workspace.dependencies]
-# Apollo 0.14.2 RC.7 plus the PC-mainnet SNOS performance fixes.
-starknet_api = { git = "https://github.com/madara-alliance/sequencer", branch = "dev", features = [
+# Committed Data Reads: pin one coherent sequencer fork for execution and proving.
+starknet_api = { git = "https://github.com/madara-alliance/sequencer", rev = "3fe9f3d9606fb640a915fe9793d021966d309a2a", features = [
   "testing",
 ] }
-starknet_os = { git = "https://github.com/madara-alliance/sequencer", branch = "dev" }
-blockifier = { git = "https://github.com/madara-alliance/sequencer", branch = "dev", features = [
+starknet_os = { git = "https://github.com/madara-alliance/sequencer", rev = "3fe9f3d9606fb640a915fe9793d021966d309a2a", features = [
+  "testing",
+] }
+blockifier = { git = "https://github.com/madara-alliance/sequencer", rev = "3fe9f3d9606fb640a915fe9793d021966d309a2a", features = [
   "testing",
   "reexecution",
 ] }
-starknet_patricia = { git = "https://github.com/madara-alliance/sequencer", branch = "dev", features = [
+starknet_patricia = { git = "https://github.com/madara-alliance/sequencer", rev = "3fe9f3d9606fb640a915fe9793d021966d309a2a", features = [
   "testing",
 ] }
-shared_execution_objects = { git = "https://github.com/madara-alliance/sequencer", branch = "dev" }
+shared_execution_objects = { git = "https://github.com/madara-alliance/sequencer", rev = "3fe9f3d9606fb640a915fe9793d021966d309a2a" }
 
-cairo-lang-starknet = "=2.17.0"
-cairo-lang-starknet-classes = "=2.17.0"
-cairo-lang-utils = "=2.17.0"
-cairo-lang-casm = "=2.17.0"
+cairo-lang-starknet = "=2.17.0-rc.4"
+cairo-lang-starknet-classes = "=2.17.0-rc.4"
+cairo-lang-utils = "=2.17.0-rc.4"
+cairo-lang-casm = "=2.17.0-rc.4"
 cairo-vm = "=3.2.0"
 
 starknet = {package = "starknet-rust", version = "0.19.0-rc.2"}

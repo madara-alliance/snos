@@ -304,6 +304,15 @@ impl BlockData {
         .map_err(|source| BlockProcessingError::TransactionExecutionTask { source })?
         .map_err(BlockProcessingError::TransactionExecution)?;
 
+        // BlockFull stops the executor without adding an error result. Never build a PIE
+        // for a prefix while claiming to have replayed the complete accepted block.
+        if execution_outputs.len() != transaction_count {
+            return Err(BlockProcessingError::InvalidBlockState(format!(
+                "Replay admitted {} of {} accepted transactions",
+                execution_outputs.len(),
+                transaction_count
+            )));
+        }
         info!("{} transactions executed successfully", transaction_count);
 
         let txn_execution_infos: Vec<TransactionExecutionInfo> =
@@ -420,6 +429,7 @@ impl BlockData {
         .await?;
 
         Ok(TransactionProcessingResult {
+            committed_data_witness_keys: txn_executor.block_context.committed_data_read_set.witness_keys(),
             starknet_api_txns,
             central_txn_execution_infos,
             accessed_addresses,
