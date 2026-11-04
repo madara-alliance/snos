@@ -18,18 +18,18 @@ license-file = "LICENSE"
 
 [workspace.dependencies]
 # Pin the same execution and hint-decoding fixes as the Native RC.9 replay candidate.
-starknet_api = { git = "https://github.com/madara-alliance/sequencer", rev = "b24f2ddec9860faeabfcacdf804a2233f2466855", features = [
+starknet_api = { git = "https://github.com/madara-alliance/sequencer", rev = "c8371e49e767d9023efe50fd81c506a83fc60d75", features = [
   "testing",
 ] }
-starknet_os = { git = "https://github.com/madara-alliance/sequencer", rev = "b24f2ddec9860faeabfcacdf804a2233f2466855" }
-blockifier = { git = "https://github.com/madara-alliance/sequencer", rev = "b24f2ddec9860faeabfcacdf804a2233f2466855", features = [
+starknet_os = { git = "https://github.com/madara-alliance/sequencer", rev = "c8371e49e767d9023efe50fd81c506a83fc60d75" }
+blockifier = { git = "https://github.com/madara-alliance/sequencer", rev = "c8371e49e767d9023efe50fd81c506a83fc60d75", features = [
   "testing",
   "reexecution",
 ] }
-starknet_patricia = { git = "https://github.com/madara-alliance/sequencer", rev = "b24f2ddec9860faeabfcacdf804a2233f2466855", features = [
+starknet_patricia = { git = "https://github.com/madara-alliance/sequencer", rev = "c8371e49e767d9023efe50fd81c506a83fc60d75", features = [
   "testing",
 ] }
-shared_execution_objects = { git = "https://github.com/madara-alliance/sequencer", rev = "b24f2ddec9860faeabfcacdf804a2233f2466855" }
+shared_execution_objects = { git = "https://github.com/madara-alliance/sequencer", rev = "c8371e49e767d9023efe50fd81c506a83fc60d75" }
 
 cairo-lang-starknet = "=2.19.6"
 cairo-lang-starknet-classes = "=2.19.6"
