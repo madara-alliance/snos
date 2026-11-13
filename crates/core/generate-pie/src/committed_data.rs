@@ -88,7 +88,8 @@ impl ReplayWitnesses {
             for chunk in group.chunks(MAX_COMMITTED_DATA_READ_KEYS) {
                 self.prefetch(chunk[0].0, &chunk.iter().map(|(_, key)| *key).collect::<Vec<_>>())?;
                 for key in chunk {
-                    witnesses.push(self.witness(*key)?.ok_or(CommittedDataError::Unavailable)?);
+                    witnesses
+                        .push(self.witness(*key)?.ok_or(CommittedDataError::Unavailable { root: key.0, key: key.1 })?);
                 }
             }
         }
@@ -158,6 +159,10 @@ impl ReplayWitnesses {
 }
 
 impl CommittedDataProvider for ReplayWitnesses {
+    fn absence(&self, root: Felt, key: Felt) -> Result<Option<CommittedDataWitness>, CommittedDataError> {
+        self.witness((root, key))
+    }
+
     fn batch(&self, root: Felt, keys: &[Felt]) -> Result<CommittedDataBatchProof, CommittedDataError> {
         if keys.is_empty() || keys.len() > MAX_COMMITTED_DATA_READ_KEYS {
             return Err(provider_error("Invalid witness batch size"));
@@ -172,7 +177,10 @@ impl CommittedDataProvider for ReplayWitnesses {
         CommittedDataBatchProof::new(root, keys, |key| self.witness((root, key)))
     }
     fn value(&self, root: Felt, key: Felt) -> Result<Option<(Felt, usize)>, CommittedDataError> {
-        Ok(self.witness((root, key))?.map(|witness| (witness.value, witness.siblings.len())))
+        Ok(self
+            .witness((root, key))?
+            .filter(|witness| witness.terminal_key.is_none())
+            .map(|witness| (witness.value, witness.siblings.len())))
     }
 }
 
@@ -383,7 +391,7 @@ mod tests {
             siblings.push(CommittedDataSibling { bit: bit as u8, hash: root });
             root = branch(bit as u8, root, root);
         }
-        let witness = CommittedDataWitness { root, key: Felt::ZERO, value: Felt::ONE, siblings };
+        let witness = CommittedDataWitness { root, key: Felt::ZERO, value: Felt::ONE, siblings, terminal_key: None };
         let provider = ReplayWitnesses::new(vec![witness.clone()], None).unwrap();
         let proof = provider.batch(root, &[Felt::ZERO, Felt::ZERO]).unwrap();
         assert_eq!(proof.branches, COMMITTED_DATA_TREE_HEIGHT);
@@ -481,15 +489,17 @@ mod tests {
         server.await.unwrap();
     }
 
+    #[rstest::rstest]
+    #[case::present(Felt::MAX)]
+    #[case::absent(Felt::ONE)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn feeder_get_witness_is_authenticated_cached_and_collected() {
+    async fn feeder_get_witness_is_authenticated_cached_and_collected(#[case] key: Felt) {
         use std::io::{Read, Write};
         let tree = CommittedDataSet::new(vec![(Felt::MAX, Felt::MAX)]).unwrap();
-        let witness = tree.witness(Felt::MAX).unwrap();
+        let witness = tree.lookup_witness(key);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}/feeder_gateway/", listener.local_addr().unwrap());
         let root = tree.root();
-        let key = Felt::MAX;
         let body = serde_json::to_string(&Some(witness.clone())).unwrap();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -509,10 +519,46 @@ mod tests {
                 .unwrap();
         });
         let provider = ReplayWitnesses::new(Vec::new(), Some(&endpoint)).unwrap();
-        assert_eq!(provider.value(root, Felt::MAX).unwrap(), Some((Felt::MAX, 0)));
+        assert_eq!(provider.value(root, key).unwrap(), (key == Felt::MAX).then_some((Felt::MAX, 0)));
         server.join().unwrap();
-        assert_eq!(provider.value(root, Felt::MAX).unwrap(), Some((Felt::MAX, 0)));
+        assert_eq!(provider.value(root, key).unwrap(), (key == Felt::MAX).then_some((Felt::MAX, 0)));
+        if key != Felt::MAX {
+            assert_eq!(provider.absence(root, key).unwrap(), Some(witness.clone()));
+        }
+        assert_eq!(provider.collect(&[(root, key)]).unwrap(), vec![witness.clone()]);
         assert_eq!(provider.take_all().unwrap(), vec![witness]);
+    }
+
+    /// Replay must retain all absence witnesses, including those after the first absent key.
+    #[test]
+    fn zero_default_batch_collects_every_lookup_for_cairo() {
+        use blockifier::execution::syscalls::committed_data::{
+            read_outcome, CommittedDataReadSet, CommittedDataWitnesses,
+        };
+        let tree = CommittedDataSet::new(vec![(Felt::ZERO, Felt::ZERO), (Felt::TWO, Felt::MAX)]).unwrap();
+        let keys = [Felt::ONE, Felt::TWO, Felt::THREE, Felt::ZERO, Felt::ONE];
+        let proofs = [Felt::ZERO, Felt::ONE, Felt::TWO, Felt::THREE].map(|key| tree.lookup_witness(key)).to_vec();
+        let provider = ReplayWitnesses::new(proofs, None).unwrap();
+        let witnesses = CommittedDataWitnesses::from_provider(provider.clone());
+        let reads = CommittedDataReadSet::default();
+        let mut gas = u64::MAX;
+        let mut calldata = vec![tree.root(), Felt::from(keys.len())];
+        calldata.extend(keys);
+        let (values, _) = read_outcome(
+            true,
+            &witnesses,
+            &reads,
+            starknet_api::abi::abi_utils::selector_from_name("get_values").0,
+            &calldata,
+            &mut gas,
+            &mut None,
+        )
+        .unwrap();
+        assert_eq!(values, vec![Felt::from(5), Felt::ZERO, Felt::MAX, Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+        let collected = provider.collect(&reads.witness_keys()).unwrap();
+        assert_eq!(collected.len(), 4);
+        assert_eq!(collected.iter().filter(|witness| witness.terminal_key.is_some()).count(), 2);
+        assert!(collected.iter().all(|witness| witness.verify()));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -669,6 +715,8 @@ mod tests {
                         Err(error) => panic!("{error}"),
                     }
                 };
+                // Accepted sockets inherit nonblocking mode on macOS; serve complete bodies.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let (headers, body) = read_http_request(&mut stream);
                 if request_index == 0 {
@@ -756,6 +804,8 @@ mod tests {
                     }
                     Err(error) => panic!("{error}"),
                 };
+                // Accepted sockets inherit nonblocking mode on macOS; serve complete bodies.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let (headers, body) = read_http_request(&mut stream);
                 let body = if headers.starts_with("POST ") {
