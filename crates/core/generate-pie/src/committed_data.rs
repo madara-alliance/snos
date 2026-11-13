@@ -529,6 +529,38 @@ mod tests {
         assert_eq!(provider.take_all().unwrap(), vec![witness]);
     }
 
+    /// Replay must retain all absence witnesses, including those after the first absent key.
+    #[test]
+    fn zero_default_batch_collects_every_lookup_for_cairo() {
+        use blockifier::execution::syscalls::committed_data::{
+            read_outcome, CommittedDataReadSet, CommittedDataWitnesses,
+        };
+        let tree = CommittedDataSet::new(vec![(Felt::ZERO, Felt::ZERO), (Felt::TWO, Felt::MAX)]).unwrap();
+        let keys = [Felt::ONE, Felt::TWO, Felt::THREE, Felt::ZERO, Felt::ONE];
+        let proofs = [Felt::ZERO, Felt::ONE, Felt::TWO, Felt::THREE].map(|key| tree.lookup_witness(key)).to_vec();
+        let provider = ReplayWitnesses::new(proofs, None).unwrap();
+        let witnesses = CommittedDataWitnesses::from_provider(provider.clone());
+        let reads = CommittedDataReadSet::default();
+        let mut gas = u64::MAX;
+        let mut calldata = vec![tree.root(), Felt::from(keys.len())];
+        calldata.extend(keys);
+        let (values, _) = read_outcome(
+            true,
+            &witnesses,
+            &reads,
+            starknet_api::abi::abi_utils::selector_from_name("get_values").0,
+            &calldata,
+            &mut gas,
+            &mut None,
+        )
+        .unwrap();
+        assert_eq!(values, vec![Felt::from(5), Felt::ZERO, Felt::MAX, Felt::ZERO, Felt::ZERO, Felt::ZERO]);
+        let collected = provider.collect(&reads.witness_keys()).unwrap();
+        assert_eq!(collected.len(), 4);
+        assert_eq!(collected.iter().filter(|witness| witness.terminal_key.is_some()).count(), 2);
+        assert!(collected.iter().all(|witness| witness.verify()));
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn authenticated_rpc_response_is_cached_and_collected_for_os() {
         use std::io::{Read, Write};
