@@ -715,6 +715,8 @@ mod tests {
                         Err(error) => panic!("{error}"),
                     }
                 };
+                // Accepted sockets inherit nonblocking mode on macOS; serve complete bodies.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let (headers, body) = read_http_request(&mut stream);
                 if request_index == 0 {
@@ -802,6 +804,8 @@ mod tests {
                     }
                     Err(error) => panic!("{error}"),
                 };
+                // Accepted sockets inherit nonblocking mode on macOS; serve complete bodies.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let (headers, body) = read_http_request(&mut stream);
                 let body = if headers.starts_with("POST ") {
