@@ -395,7 +395,8 @@ mod tests {
         let provider = ReplayWitnesses::new(vec![witness.clone()], None).unwrap();
         let proof = provider.batch(root, &[Felt::ZERO, Felt::ZERO]).unwrap();
         assert_eq!(proof.branches, COMMITTED_DATA_TREE_HEIGHT);
-        assert_eq!(proof.proof.len(), 4 * COMMITTED_DATA_TREE_HEIGHT + 2);
+        assert_eq!(proof.facts.len(), COMMITTED_DATA_TREE_HEIGHT);
+        assert_eq!(proof.facts, witness.facts().unwrap());
         assert_eq!(proof.leaves, vec![Felt::ZERO, Felt::ONE]);
         assert_eq!(proof.indices, vec![0, 0]);
         assert_eq!(provider.take_all().unwrap(), vec![witness]);
@@ -815,7 +816,7 @@ mod tests {
                     let query: serde_json::Value = serde_json::from_slice(&body).unwrap();
                     let root: Felt = serde_json::from_value(query["root"].clone()).unwrap();
                     let keys: Vec<Felt> = serde_json::from_value(query["keys"].clone()).unwrap();
-                    let proofs: Vec<_> = keys.iter().map(|key| trees[&root].witness(*key).unwrap()).collect();
+                    let proofs: Vec<_> = keys.iter().map(|key| trees[&root].lookup_witness(*key)).collect();
                     serde_json::to_vec(&proofs).unwrap()
                 } else {
                     let url =
@@ -823,7 +824,7 @@ mod tests {
                             .unwrap();
                     let query: BTreeMap<_, _> = url.query_pairs().into_owned().collect();
                     let root = Felt::from_hex(&query["root"]).unwrap();
-                    serde_json::to_vec(&trees[&root].witness(Felt::from_hex(&query["key"]).unwrap())).unwrap()
+                    serde_json::to_vec(&trees[&root].lookup_witness(Felt::from_hex(&query["key"]).unwrap())).unwrap()
                 };
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())
                     .unwrap();
