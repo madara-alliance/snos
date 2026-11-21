@@ -395,7 +395,8 @@ mod tests {
         let provider = ReplayWitnesses::new(vec![witness.clone()], None).unwrap();
         let proof = provider.batch(root, &[Felt::ZERO, Felt::ZERO]).unwrap();
         assert_eq!(proof.branches, COMMITTED_DATA_TREE_HEIGHT);
-        assert_eq!(proof.proof.len(), 4 * COMMITTED_DATA_TREE_HEIGHT + 2);
+        assert_eq!(proof.facts.len(), COMMITTED_DATA_TREE_HEIGHT);
+        assert_eq!(proof.facts, witness.facts().unwrap());
         assert_eq!(proof.leaves, vec![Felt::ZERO, Felt::ONE]);
         assert_eq!(proof.indices, vec![0, 0]);
         assert_eq!(provider.take_all().unwrap(), vec![witness]);
@@ -490,12 +491,13 @@ mod tests {
     }
 
     #[rstest::rstest]
-    #[case::present(Felt::MAX)]
+    #[case::present(Felt::TWO.pow(251_u32) - Felt::ONE)]
     #[case::absent(Felt::ONE)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn feeder_get_witness_is_authenticated_cached_and_collected(#[case] key: Felt) {
         use std::io::{Read, Write};
-        let tree = CommittedDataSet::new(vec![(Felt::MAX, Felt::MAX)]).unwrap();
+        let maximum_key = Felt::TWO.pow(251_u32) - Felt::ONE;
+        let tree = CommittedDataSet::new(vec![(maximum_key, Felt::MAX)]).unwrap();
         let witness = tree.lookup_witness(key);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}/feeder_gateway/", listener.local_addr().unwrap());
@@ -519,10 +521,10 @@ mod tests {
                 .unwrap();
         });
         let provider = ReplayWitnesses::new(Vec::new(), Some(&endpoint)).unwrap();
-        assert_eq!(provider.value(root, key).unwrap(), (key == Felt::MAX).then_some((Felt::MAX, 0)));
+        assert_eq!(provider.value(root, key).unwrap(), (key == maximum_key).then_some((Felt::MAX, 0)));
         server.join().unwrap();
-        assert_eq!(provider.value(root, key).unwrap(), (key == Felt::MAX).then_some((Felt::MAX, 0)));
-        if key != Felt::MAX {
+        assert_eq!(provider.value(root, key).unwrap(), (key == maximum_key).then_some((Felt::MAX, 0)));
+        if key != maximum_key {
             assert_eq!(provider.absence(root, key).unwrap(), Some(witness.clone()));
         }
         assert_eq!(provider.collect(&[(root, key)]).unwrap(), vec![witness.clone()]);
@@ -557,7 +559,7 @@ mod tests {
         assert_eq!(values, vec![Felt::from(5), Felt::ZERO, Felt::MAX, Felt::ZERO, Felt::ZERO, Felt::ZERO]);
         let collected = provider.collect(&reads.witness_keys()).unwrap();
         assert_eq!(collected.len(), 4);
-        assert_eq!(collected.iter().filter(|witness| witness.terminal_key.is_some()).count(), 2);
+        assert_eq!(collected.iter().filter(|witness| witness.terminal_key.is_some()).count(), 3);
         assert!(collected.iter().all(|witness| witness.verify()));
     }
 
@@ -675,7 +677,9 @@ mod tests {
     async fn feeder_batch_transport_and_timing(#[case] case: &str, #[case] succeeds: bool) {
         use std::io::Write;
         let entries = if case == "maximum_wide_keys" {
-            (0..MAX_COMMITTED_DATA_READ_KEYS).map(|index| (Felt::MAX - Felt::from(index), Felt::from(index))).collect()
+            (0..MAX_COMMITTED_DATA_READ_KEYS)
+                .map(|index| (Felt::TWO.pow(251_u32) - Felt::ONE - Felt::from(index), Felt::from(index + 1)))
+                .collect()
         } else {
             vec![(Felt::ZERO, Felt::TWO), (Felt::ONE, Felt::MAX)]
         };
@@ -812,7 +816,7 @@ mod tests {
                     let query: serde_json::Value = serde_json::from_slice(&body).unwrap();
                     let root: Felt = serde_json::from_value(query["root"].clone()).unwrap();
                     let keys: Vec<Felt> = serde_json::from_value(query["keys"].clone()).unwrap();
-                    let proofs: Vec<_> = keys.iter().map(|key| trees[&root].witness(*key).unwrap()).collect();
+                    let proofs: Vec<_> = keys.iter().map(|key| trees[&root].lookup_witness(*key)).collect();
                     serde_json::to_vec(&proofs).unwrap()
                 } else {
                     let url =
@@ -820,7 +824,7 @@ mod tests {
                             .unwrap();
                     let query: BTreeMap<_, _> = url.query_pairs().into_owned().collect();
                     let root = Felt::from_hex(&query["root"]).unwrap();
-                    serde_json::to_vec(&trees[&root].witness(Felt::from_hex(&query["key"]).unwrap())).unwrap()
+                    serde_json::to_vec(&trees[&root].lookup_witness(Felt::from_hex(&query["key"]).unwrap())).unwrap()
                 };
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())
                     .unwrap();

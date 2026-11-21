@@ -23,6 +23,21 @@ const RPC_REQUEST_TIMEOUT_ENV: &str = "SNOS_RPC_REQUEST_TIMEOUT_SECS";
 const RPC_CONNECT_TIMEOUT_ENV: &str = "SNOS_RPC_CONNECT_TIMEOUT_SECS";
 const RPC_POOL_MAX_IDLE_PER_HOST_ENV: &str = "SNOS_RPC_POOL_MAX_IDLE_PER_HOST";
 
+/// Preserve an explicit Starknet RPC version or append the default to the service prefix.
+fn starknet_rpc_endpoint(base_url: &str) -> anyhow::Result<Url> {
+    let mut url = Url::parse(base_url)?;
+    let path = url.path().trim_end_matches('/');
+    let is_versioned = path.rsplit_once("/rpc/v").is_some_and(|(_, version)| {
+        let separator = if version.contains('_') { '_' } else { '.' };
+        version.contains(separator)
+            && version.split(separator).all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    });
+    if !is_versioned {
+        url.set_path(&format!("{path}/rpc/{STARKNET_RPC_VERSION}"));
+    }
+    Ok(url)
+}
+
 pub trait ProofClient {
     fn get_proof(
         &self,
@@ -103,8 +118,12 @@ impl RpcClientInner {
         timing: Arc<RpcTimingRecorder>,
         rpc_pool_max_idle_per_host: usize,
     ) -> anyhow::Result<Self> {
-        let starknet_rpc_url = format!("{}/rpc/{}", base_url, STARKNET_RPC_VERSION);
-        info!("Initializing Starknet RPC client with URL: {}", starknet_rpc_url);
+        let starknet_rpc_url = starknet_rpc_endpoint(base_url)?;
+        info!(
+            "Initializing Starknet RPC client at {}{}",
+            starknet_rpc_url.origin().ascii_serialization(),
+            starknet_rpc_url.path()
+        );
 
         let rpc_request_timeout_secs = Self::read_env_u64(RPC_REQUEST_TIMEOUT_ENV, DEFAULT_RPC_REQUEST_TIMEOUT_SECS);
         let rpc_connect_timeout_secs = Self::read_env_u64(RPC_CONNECT_TIMEOUT_ENV, DEFAULT_RPC_CONNECT_TIMEOUT_SECS);
@@ -113,14 +132,12 @@ impl RpcClientInner {
             rpc_request_timeout_secs, rpc_connect_timeout_secs, rpc_pool_max_idle_per_host
         );
 
-        let starknet_rpc_url = Url::parse(starknet_rpc_url.as_str())
-            .map_err(|e| anyhow!("Failed to parse URL ({}): {}", starknet_rpc_url, e))?;
         let http_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(rpc_connect_timeout_secs))
             .pool_max_idle_per_host(rpc_pool_max_idle_per_host)
             .timeout(Duration::from_secs(rpc_request_timeout_secs))
             .build()
-            .map_err(|e| anyhow!("Failed to create reqwest client for {}: {}", starknet_rpc_url, e))?;
+            .map_err(|e| anyhow!("Failed to create reqwest client: {}", e))?;
 
         let provider = JsonRpcClient::new(HttpTransport::new_with_client(starknet_rpc_url, http_client));
 
@@ -164,7 +181,7 @@ impl RpcClient {
     ///
     /// # Arguments
     ///
-    /// * `base_url` - The base URL of the RPC server (e.g., "https://your-starknet-node.com")
+    /// * `base_url` - The RPC service base URL or explicit versioned endpoint (e.g., "https://node/rpc/v0_10_2").
     ///
     /// # Returns
     ///
@@ -509,8 +526,23 @@ mod tests {
     use super::*;
     use crate::state_reader::AsyncRpcStateReader;
 
+    #[rstest::rstest]
+    #[case("https://node", "https://node/rpc/v0_10")]
+    #[case("https://node/team%2Fone/", "https://node/team%2Fone/rpc/v0_10")]
+    #[case("https://node/team/?key=a%2Fb", "https://node/team/rpc/v0_10?key=a%2Fb")]
+    #[case("https://node/rpc/v0_10", "https://node/rpc/v0_10")]
+    #[case("https://backup/team/rpc/v0_10_2/?key=a%2Fb", "https://backup/team/rpc/v0_10_2/?key=a%2Fb")]
+    #[case("https://node/rpc/v0.10.2/", "https://node/rpc/v0.10.2/")]
+    #[case("https://node/rpc/vendor_2", "https://node/rpc/vendor_2/rpc/v0_10")]
+    fn resolves_starknet_rpc_endpoint(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(starknet_rpc_endpoint(input).unwrap().as_str(), expected);
+    }
+
     fn serve_json_rpc_request(stream: &mut TcpStream) {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        assert_eq!(request_line, "POST /tenant/rpc/v0_10_2/?network=test HTTP/1.1\r\n");
         let mut content_length = 0;
         loop {
             let mut header = String::new();
@@ -550,7 +582,7 @@ mod tests {
             serve_json_rpc_request(&mut async_connection);
         });
 
-        (format!("http://{address}"), server)
+        (format!("http://{address}/tenant/rpc/v0_10_2/?network=test"), server)
     }
 
     #[test]

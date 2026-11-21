@@ -257,9 +257,11 @@ The aggregator needs no committed-data flag.
 The sequencer revision in Cargo.toml supplies the matching Blockifier and compiled OS.
 The OS and virtual-OS program hashes change with this verifier; the aggregator output
 format is unchanged. Prover/settlement configuration must accept the new programs.
-This replaces an unreleased indexed format: regenerate roots, datasets and witnesses
-and update callers to pass keys. Existing historical blocks require their matching
-execution/proving stack; roots cannot be retroactively replaced during replay.
+This prototype replaces the custom committed-data commitment with standard 251-bit
+Poseidon Patricia commitments. Keys must be below `2^251`; zero values and absent
+keys have the same commitment. Existing roots and witnesses are incompatible and
+must be regenerated for newly published datasets. Existing historical blocks require
+their matching execution/proving stack; roots cannot be retroactively replaced during replay.
 
 `generate_pie(PieGenerationInput)` accepts witnesses directly in
 `os_hints_config.committed_data_witnesses`. The binary accepts the complete typed
@@ -273,43 +275,47 @@ collected witnesses to the OS in memory. Set `os_hints_config.use_committed_data
 file remains a standalone CLI convenience, not a requirement for orchestration. Both
 `generate-pie` and `rpc-replay` accept `--use-committed-data`,
 `--committed-data-rpc-url` and `--committed-data-witnesses-path`. Witness objects
-contain only `root`, `key`, `value` and a bottom-up `siblings: [{bit, hash}, ...]` array. Repeated
+contain `root`, `key`, `value`, a bottom-up `siblings: [{bit, hash}, ...]` array and
+an optional `terminal_key` for authenticated absence. Repeated
 reads share one cached witness per `(root, key)`; duplicate tuples in supplied
 witness arrays are rejected. The legacy JSON-RPC witness transport is retained only
 for compatibility and is selected when the URL does not end in `/feeder_gateway`;
 current Madara deployments should use the feeder URL.
 
-Version one supports up to 524,288 key/value entries per root and 65,536 distinct
-witnesses per generation request. Structured JSON is limited to 128 MiB; each
+The adapter supports up to 524,288 nonzero entries per root and 65,536 distinct
+witnesses per block. Inline witness input is also limited to 65,536 entries; remote
+retrieval can serve multiple blocks through a bounded cache. Structured JSON is limited to 128 MiB; each
 witness response is limited to 32 KiB and a 30-second request timeout. Oversized,
-malformed, duplicate or mismatching witnesses fail. Missing data also fails replay;
-it is never replaced with zero or converted into a provable arbitrary revert.
+malformed, duplicate or mismatching witnesses fail. Missing datasets or unavailable
+witnesses also fail replay; only cryptographically authenticated absence returns zero.
 Configure batch sizes and retention accordingly. Every proving node must retain or
 be able to retrieve historical datasets for the roots it replays. Committing a root
 does not make the dataset available or its underlying real-world values truthful.
 
-The extra read charge depends on the actual number of Patricia branches `h`, not the
-number of dataset entries. Bounds reserve `600 + 300h` steps, `40 + 20h` range checks
-and `2h + 2` Poseidon permutations. The ordinary CallContract resource allowance is
-already counted and is subtracted from the extra charge. Blockifier and Cairo use
-the same formula; the OS flow test profiles paths including high-bit keys and 252
-branches against the bouncer allowance. Proving gas uses the configured proving
-builtin weights, which differ from Sierra weights. Changing these constants requires
-coordinated execution/prover changes and regenerated program hashes.
+This standard-Patricia prototype conservatively charges a complete 251-bit path
+for each newly observed `(root, key)` in the block-local read set. It does not use
+actual tree depth. Each new path reserves 252,000 steps, 25,200 range checks and
+502 Poseidon permutations. Every call also reserves `800 + 80c` steps and
+`20 + 4c` range checks for its `c` requested keys, including repeated keys. The
+ordinary CallContract allowance is subtracted from the extra syscall charge.
+Repeated reads therefore still pay request work but do not pay for another path.
 
-The batch entrypoint is `get_values(root, count, key_0, ..., key_{count-1})`, with 1–1024
-keys, returning `[count, value_0, ..., value_{count-1}]` in request order, including duplicates.
-It authenticates the union of requested paths. For `c` requested keys (including
-duplicates), `u` unique leaves and `b` expanded branches, its resource bounds are
-`1000 + 60c + 160u + 160b` steps, `30 + 4c + 12u + 6b` range checks,
-`2(b + u)` Poseidon permutations and `2u` bitwise instances. The ordinary
-CallContract allowance is subtracted once. Failed Sierra-tracked calls reserve
-unpaid proof work for block admission separately, without changing receipt fees.
+The batch entrypoint is `get_values(root, count, key_0, ..., key_{count-1})`, with
+1–1024 keys, returning `[count, value_0, ..., value_{count-1}]` in request order,
+including duplicates. Both selectors use the same read set and accounting for
+present and absent keys. The OS verifies the collected standard Patricia facts;
+authenticated absence returns zero. Missing datasets remain availability errors.
+
+This is a conservative prototype tariff, not the final production price. Its
+400-distinct-read charge exceeds the tested transaction gas limit; tightening it
+requires measured standard-verifier resource bounds and coordinated Blockifier/OS
+validation. Proving builtin weights differ from Sierra weights. Do not infer
+production capacity or deploy a changed tariff from these allowances alone.
 
 Adapters must validate both authorized/fresh roots and valid keys before
 calling this primitive. They must not expose arbitrary root/key forwarding. Publish
 roots only after their complete datasets are durably imported and replicated. Otherwise
 an attacker can deliberately trigger an availability failure after expensive execution,
 causing an uncharged transaction rejection. Adapter code and upgrade/publication authority
-are therefore part of the appchain's operational security boundary. Membership verification
-still runs in Cairo for every successful read; the proof does not trust host-returned values.
+are therefore part of the appchain's operational security boundary. The collected reads
+are authenticated by Cairo against their roots; the proof does not trust host-returned values.
