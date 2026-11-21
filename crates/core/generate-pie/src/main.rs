@@ -33,7 +33,7 @@ struct Cli {
     #[arg(short, long, value_delimiter = ',', required_unless_present = "input_stdin", env = "SNOS_BLOCKS")]
     blocks: Vec<u64>,
 
-    /// RPC URL to connect to
+    /// Starknet RPC service URL or explicit versioned endpoint such as http://madara:9944/rpc/v0_10_2
     #[arg(short, long, required_unless_present = "input_stdin", env = "SNOS_RPC_URL")]
     rpc_url: Option<String>,
 

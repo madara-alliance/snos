@@ -32,7 +32,7 @@ use crate::types::{ChainConfig, OsHintsConfiguration};
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PieGenerationInput {
-    /// The RPC URL of the Starknet node to connect to.
+    /// Starknet RPC service URL or a full versioned endpoint such as http://madara:9944/rpc/v0_10_2.
     pub rpc_url: String,
     /// Optional operator-configured Madara feeder gateway; fetches authenticated witnesses on demand.
     /// Inline witnesses remain supported for air-gapped proving and reproducible inputs.
